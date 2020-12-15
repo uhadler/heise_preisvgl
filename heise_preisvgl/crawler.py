@@ -6,14 +6,12 @@ Created on Tue Dec  14 19:45:03 2020
 """
 
 from bs4 import BeautifulSoup
-import requests
-import time
-import numpy as np
+import requests, time, getpass
 
 
 class Crawler():
     
-    def __init__(self, url=None, max_price=None, sleep_time = 15, alert_by_mail=False):
+    def __init__(self, url=None, max_price=None, sleep_time = 40, alert_by_mail=False):
         """Constructor"""
         self.PREFIX_ = "https://www.heise.de/preisvergleich/"
         
@@ -33,7 +31,12 @@ class Crawler():
             raise ValueError("Sleep time between requests is set to zero or lower.")
         self.SLEEP_TIME_ = sleep_time
         
-        self.ALERT_MAIL_ = False
+        self.ALERT_MAIL_ = alert_by_mail
+        if self.ALERT_MAIL_:
+            # only implemented for gmail
+            self.USERNAME_ = input("Gmail Username:")
+            self.PASSWORD_ = getpass.getpass("Password:")
+            pass
         self.FOUND_MATCH_ = False
     
     def crawl(self):
@@ -41,7 +44,7 @@ class Crawler():
         If such an offer is found, send email notification."""
         
         while not self.FOUND_MATCH_:
-                
+            
             # get page data
             session = requests.session()
             response = session.get(self.URL_)
@@ -60,12 +63,19 @@ class Crawler():
                                 .text[2:]
                                 .replace(",", "."))
                           for item in itemPriceClasses]
+            
+            try:
+                min(itemPrices)
+            except: 
+                time.sleep(self.SLEEP_TIME_)
+                continue
+            
             if min(itemPrices) < self.MAX_PRICE_:
                 # match found -> alert with link
                 self.FOUND_MATCH_ = True
                 
                 indexes = [idx for idx, price in enumerate(itemPrices) if price < self.MAX_PRICE_]
-                prices = [itemPrices[i] for i in indexes]
+                prices = [round(itemPrices[i], 2) for i in indexes]
                 itemClasses = soup.find_all('a', class_='productlist__link')
                 # get names
                 itemNames = [item.find_all("span", "notrans")[0]
@@ -80,12 +90,31 @@ class Crawler():
                 itemLinks = [itemLinks[idx] for idx in indexes]
     
                 print(f"Found {len(indexes)} matches with prices lower than {self.MAX_PRICE_}:\n")
-                for idx, link in enumerate(itemLinks):
-                    print(f"\t{idx+1}:\t{itemNames[idx]} with a price of {prices[idx]}.")
+                for idx, (price, name, link) in enumerate(zip(prices, itemNames, itemLinks)):
+                    print(f"\t{idx+1}:\t{name} with a price of {price}.")
                     print(f"\t\t{link}\n")
                     
                 if self.ALERT_MAIL_:
-                    # TODO
+                    import smtplib, email
+                    
+                    try:
+                        server = smtplib.SMTP_SSL("smtp.gmail.com", 465)
+                        msg = email.message.EmailMessage()
+                        
+                        msg["Subject"] = "Heise Preisvergleich Match"
+                        msg["From"] = self.USERNAME_
+                        msg["To"] = self.USERNAME_
+                        body = f"Found {len(indexes)} matches with prices lower than {self.MAX_PRICE_}€:\n"
+                        for price, name, link in zip(prices, itemNames, itemLinks):
+                            body = body + f"\t{name} with a price of {price}€.\n"
+                            body = body + f"\t{link}\n\n"
+                        msg.set_content(body)
+                        server.login(self.USERNAME_, self.PASSWORD_)
+                        server.send_message(msg)
+                        server.quit()
+                    except:
+                        print("Failed to send mail.")
+                    
                     pass
                 
                 
